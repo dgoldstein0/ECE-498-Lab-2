@@ -1,0 +1,13 @@
+This directory contains a sequential implementation, lab2-seq.c,
+three images (small, big, and huge), and a skeletal version,
+lab2-base.c, for your implementation.  If you prefer, you may start
+with lab2-seq.c.
+
+I'm giving you a sequential version so that you (a) have a reference,
+(b) feel compelled to do something in parallel, and (c) don't spend
+a lot of time creating a sequential version.  It took me a little
+over an hour to get it working.  It's fun to play with.
+
+The Makefile in this directory makes the sequential version.
+
+--Steve
