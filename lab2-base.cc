@@ -44,8 +44,22 @@ using namespace std;
  * sample operation signature
  */
 void
-operate (int32_t width, int32_t height, int8_t* buf)
+operate (int32_t width, int32_t height, int8_t* buf, int num_cores)
 {
+  pthread_t *threads;
+
+  threads = new pthread_t[num_cores];
+  for(int i = 0; i < num_cores; i++)
+  {
+    int rc = pthread_create(threads+i, NULL, thread_func, NULL);
+    if (rc)
+    {
+      cout << "Failed to allocate thread #" << i << endl;
+      delete threads;
+      return;
+    }
+  }
+  pthread_exit(NULL);
 }
 
 /*
@@ -434,7 +448,7 @@ main (int argc, char* argv[])
 
     cout << num_cores << " cores" << endl;
 
-    operate (width, height, buf);
+    operate (width, height, buf, num_cores);
     if (-1 == save_jpeg_file ("new.jpg", width, height, buf)) {
         return 2;
     }
