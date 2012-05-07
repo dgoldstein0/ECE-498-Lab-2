@@ -4,7 +4,7 @@ ALL: $(execs)
 
 CFLAGS := -g -Wall -std=c99
 CPPFLAGS := -g -Wall -std=c++0x
-LIBS := -ljpeg -lm
+LIBS := -ljpeg -lm -lpthread
 
 lab2seq: lab2-seq.o Makefile
 	gcc ${CFLAGS} -pg -o lab2seq lab2-seq.o ${LIBS}

@@ -387,8 +387,8 @@ color_components (int32_t width, int32_t height, int32_t* edge,
     if (NULL == (cq = new comp_queue_t[width * height])) {
         return -1;
     }
-    if (NULL == (color_pixels = malloc (width * height * 
-    					sizeof (color_pixels[0])))) {
+    if (NULL == (color_pixels = new int32_t[width * height] 
+    					)) {
 	free (cq);
         return -1;
     }
