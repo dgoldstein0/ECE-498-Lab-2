@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include <jpeglib.h>
 #include <iostream>
+#include <math.h>
 
 using namespace std;
 
@@ -72,13 +73,13 @@ static int32_t thresh;
  * SIDE EFFECTS: prints error messages to stderr; terminates on fatal
  *               error, etc. (libjpeg defines standard error handling)
  */
-int8_t*
+JSAMPLE*
 load_jpeg_file (const char* fname, int32_t* w_ptr, int32_t* h_ptr)
 {
     FILE* f;
     static struct jpeg_error_mgr jem;
     struct jpeg_decompress_struct decompress;
-    int8_t* buf;
+    JSAMPLE* buf;
     int32_t n_read;
     int32_t one_read;
     JSAMPARRAY rows;
@@ -124,9 +125,9 @@ load_jpeg_file (const char* fname, int32_t* w_ptr, int32_t* h_ptr)
     }
 
     // assume RGB
-    if (NULL == (buf = (int8_t*) malloc (width * height * 3)) ||
+    if (NULL == (buf = new JSAMPLE[width * height * 3]) ||
         NULL == (rows = (JSAMPLE**) malloc (height * sizeof (rows[0])))) {
-        if (NULL != buf) {free (buf);}
+        if (NULL != buf) {delete [] buf;}
         perror ("malloc");
         fclose (f);
         jpeg_destroy_decompress (&decompress);
@@ -429,7 +430,7 @@ void* thread_func (void* p)
  * sample operation signature
  */
 void
-operate (int32_t width, int32_t height, int8_t* buf, int num_cores)
+operate (int num_cores)
 {
   pthread_t *threads;
 
