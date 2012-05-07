@@ -466,7 +466,6 @@ usage (const char* exec_name)
 int
 main (int argc, char* argv[])
 {
-    JSAMPLE *buf;
     char* after; 
     double threshd;
     int32_t seg_size;
@@ -494,7 +493,7 @@ main (int argc, char* argv[])
 
     cout << num_cores << " cores" << endl;
 
-    operate (width, height, buf, num_cores);
+    operate (num_cores);
 
     free (input_image);
 
