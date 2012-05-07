@@ -35,6 +35,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <jpeglib.h>
+#include <iostream>
+
+using namespace std;
 
 
 /*
@@ -68,9 +71,9 @@ load_jpeg_file (const char* fname, int32_t* w_ptr, int32_t* h_ptr)
     int32_t n_read;
     int32_t one_read;
     JSAMPARRAY rows;
-    int32_t i;
-    int32_t height;
-    int32_t width;
+    uint32_t i;
+    uint32_t height;
+    uint32_t width;
 
     if (NULL == (f = fopen (fname, "rb"))) {
         perror ("fopen");
@@ -110,8 +113,8 @@ load_jpeg_file (const char* fname, int32_t* w_ptr, int32_t* h_ptr)
     }
 
     // assume RGB
-    if (NULL == (buf = malloc (width * height * 3)) ||
-	NULL == (rows = malloc (height * sizeof (rows[0])))) {
+    if (NULL == (buf = (int8_t*) malloc (width * height * 3)) ||
+	NULL == (rows = (JSAMPLE**) malloc (height * sizeof (rows[0])))) {
 	if (NULL != buf) {free (buf);}
         perror ("malloc");
 	fclose (f);
@@ -119,7 +122,7 @@ load_jpeg_file (const char* fname, int32_t* w_ptr, int32_t* h_ptr)
 	return NULL;
     }
     for (i = 0; height > i; i++) {
-        rows[i] = buf + i * width * 3;
+        rows[i] = (JSAMPLE*) buf + i * width * 3;
     }
 
     n_read = 0;
@@ -169,14 +172,14 @@ save_jpeg_file (const char* fname, int32_t width, int32_t height,
         perror ("fopen new");
 	return -1;
     }
-    if (NULL == (rows = malloc (height * sizeof (rows[0])))) {
+    if (NULL == (rows = (JSAMPARRAY) malloc (height * sizeof (rows[0])))) {
         perror ("malloc");
 	fclose (g);
 	jpeg_destroy_compress (&compress);
 	return -1;
     }
     for (i = 0; height > i; i++) {
-        rows[i] = buf + i * width * 3;
+        rows[i] = (JSAMPLE*) buf + i * width * 3;
     }
 
     /* 
@@ -205,6 +208,13 @@ save_jpeg_file (const char* fname, int32_t width, int32_t height,
     return 0;
 }
 
+static int32_t
+usage (const char* exec_name)
+{
+    fprintf (stderr, "syntax: %s <jpg file> <threshold> <segment size>\n", 
+	     exec_name);
+    return 2;
+}
 
 int
 main (int argc, char* argv[])
@@ -212,14 +222,29 @@ main (int argc, char* argv[])
     int8_t* buf;
     int32_t height;
     int32_t width;
+    char* after; 
+    double thresh;
+    int32_t seg_size;
 
-    if (2 != argc) {
-        fprintf (stderr, "syntax: %s <jpg file>\n", argv[0]);
-	return 2;
+    if (4 != argc) {
+	return usage (argv[0]);
+    }
+    thresh = strtod (argv[2], &after);
+    if (argv[2] == after  || '\0' != *after) {
+	return usage (argv[0]);
+    }
+    seg_size = strtol (argv[3], &after, 10);
+    if (argv[3] == after  || '\0' != *after) {
+	return usage (argv[0]);
     }
     if (NULL == (buf = load_jpeg_file (argv[1], &width, &height))) {
         return 2;
     }
+    
+    int num_cores = sysconf( _SC_NPROCESSORS_ONLN );
+
+    cout << num_cores << " cores" << endl;
+
     operate (width, height, buf);
     if (-1 == save_jpeg_file ("new.jpg", width, height, buf)) {
         return 2;
