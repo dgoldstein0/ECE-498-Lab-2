@@ -39,6 +39,10 @@
 
 using namespace std;
 
+void* thread_func (void*)
+{
+    return NULL;
+}
 
 /*
  * sample operation signature
@@ -236,10 +240,10 @@ save_jpeg_file (const char* fname, int32_t width, int32_t height,
  *               integer per pixel in original image)
  * SIDE EFFECTS: dynamically allocates memory
  */
-void find_edges (int32_t* edge, int32_t x_start, int32_t x_end,
-                 int32_t y_start, int32_t y_end, JSAMPLE* buf, int32_t thresh)
+void find_edges (int32_t* edge, int32_t x_start, int32_t x_end, int32_t y_start,
+                 int32_t y_end, int32_t width, int32_t height, JSAMPLE* buf,
+                 int32_t thresh)
 {
-    int32_t* edge;
     int32_t x;
     int32_t y;
     int32_t color;
@@ -380,7 +384,7 @@ color_components (int32_t width, int32_t height, int32_t* edge,
     int32_t y;
     int32_t* color_pixels;
 
-    if (NULL == (cq = malloc (width * height * sizeof (cq[0])))) {
+    if (NULL == (cq = new comp_queue_t[width * height])) {
         return -1;
     }
     if (NULL == (color_pixels = malloc (width * height * 
