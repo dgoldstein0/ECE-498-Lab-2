@@ -419,7 +419,8 @@ void* thread_func (void* p)
     //TODO: make this work
 
     if (-1 == save_jpeg_file ("new.jpg", width, height, input_image)) {
-        return 2;
+        cout << "save_jpeg_file returned -1 "<< endl;
+        return NULL;
     }
 
     return NULL;
@@ -429,7 +430,7 @@ void* thread_func (void* p)
  * sample operation signature
  */
 void
-operate (int32_t width, int32_t height, int8_t* buf, int num_cores)
+operate (int32_t width, int32_t height, JSAMPLE* buf, int num_cores)
 {
   pthread_t *threads;
 
@@ -458,6 +459,7 @@ usage (const char* exec_name)
 int
 main (int argc, char* argv[])
 {
+    JSAMPLE *buf;
     char* after; 
     double threshd;
     int32_t seg_size;
@@ -485,7 +487,7 @@ main (int argc, char* argv[])
 
     cout << num_cores << " cores" << endl;
 
-    operate (num_cores);
+    operate (width, height, buf, num_cores);
 
     free (input_image);
 
