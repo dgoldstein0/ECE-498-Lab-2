@@ -45,6 +45,10 @@ struct params_t {
     int32_t x_end;
     int32_t y_start;
     int32_t y_end;
+
+    params_t(int32_t x_s, int32_t x_e, int32_t y_s, int32_t y_e) : x_start(x_s), x_end(x_e), y_start(y_s), y_end(y_e)
+    {
+    }
 };
 
 //Global edge-detection map
@@ -432,20 +436,22 @@ void* thread_func (void* p)
 void
 operate (int num_cores)
 {
-  pthread_t *threads;
+    pthread_t *threads;
 
-  threads = new pthread_t[num_cores];
-  for(int i = 0; i < num_cores; i++)
-  {
-    int rc = pthread_create(threads+i, NULL, thread_func, NULL);
-    if (rc)
+    threads = new pthread_t[num_cores];
+    for(int i = 0; i < num_cores; i++)
     {
-      cout << "Failed to allocate thread #" << i << endl;
-      delete threads;
-      return;
+        params_t *param = new params_t(0, width, (i*height)/num_cores, ((i+1)*height)/num_cores);
+
+        int rc = pthread_create(threads+i, NULL, thread_func, param);
+        if (rc)
+        {
+            cout << "Failed to allocate thread #" << i << endl;
+            delete threads;
+            return;
+        }
     }
-  }
-  pthread_exit(NULL);
+    pthread_exit(NULL);
 }
 
 static int32_t
