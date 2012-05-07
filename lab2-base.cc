@@ -1,4 +1,4 @@
-/*									tab:8
+/*                                                                        tab:8
  *
  * lab3-base.c - sample libjpeg code for ECE498SL Lab 3, Spring 2009
  *
@@ -22,13 +22,13 @@
  * THE UNIVERSITY OF ILLINOIS HAS ANY OBLIGATION TO PROVIDE MAINTENANCE, 
  * SUPPORT, UPDATES, ENHANCEMENTS, OR MODIFICATIONS."
  *
- * Author:	    Steve Lumetta
- * Version:	    1
+ * Author:            Steve Lumetta
+ * Version:            1
  * Creation Date:   Mon Apr 13 20:20:34 2009
- * Filename:	    lab3-base.c
+ * Filename:            lab3-base.c
  * History:
- *	SL	1	Mon Apr 13 20:20:34 2009
- *		First written.
+ *        SL        1        Mon Apr 13 20:20:34 2009
+ *                First written.
  */
 
 #include <stdint.h>
@@ -39,32 +39,25 @@
 
 using namespace std;
 
-void* thread_func (void*)
-{
-    return NULL;
-}
+struct params_t {
+    int32_t x_start;
+    int32_t x_end;
+    int32_t y_start;
+    int32_t y_end;
+};
 
-/*
- * sample operation signature
- */
-void
-operate (int32_t width, int32_t height, int8_t* buf, int num_cores)
-{
-  pthread_t *threads;
+//Global edge-detection map
+static int32_t* edges;
 
-  threads = new pthread_t[num_cores];
-  for(int i = 0; i < num_cores; i++)
-  {
-    int rc = pthread_create(threads+i, NULL, thread_func, NULL);
-    if (rc)
-    {
-      cout << "Failed to allocate thread #" << i << endl;
-      delete threads;
-      return;
-    }
-  }
-  pthread_exit(NULL);
-}
+//width and height of our image
+static int32_t width;
+static int32_t height;
+
+//The input image
+static JSAMPLE* input_image;
+
+//The square of the threshold
+static int32_t thresh;
 
 /*
  * load_jpeg_file -- load a JPEG from a file into an RGB pixel format
@@ -95,7 +88,7 @@ load_jpeg_file (const char* fname, int32_t* w_ptr, int32_t* h_ptr)
 
     if (NULL == (f = fopen (fname, "rb"))) {
         perror ("fopen");
-	return NULL;
+        return NULL;
     }
 
     /* 
@@ -111,9 +104,9 @@ load_jpeg_file (const char* fname, int32_t* w_ptr, int32_t* h_ptr)
     jpeg_stdio_src (&decompress, f);
     if (JPEG_HEADER_OK != jpeg_read_header (&decompress, TRUE)) {
         fputs ("bad header!  (not a JPEG file?)\n", stderr);
-	fclose (f);
-	jpeg_destroy_decompress (&decompress);
-	return NULL;
+        fclose (f);
+        jpeg_destroy_decompress (&decompress);
+        return NULL;
     }
     /*
      * returns a boolean...what does it mean?  
@@ -125,19 +118,19 @@ load_jpeg_file (const char* fname, int32_t* w_ptr, int32_t* h_ptr)
     height = decompress.output_height;
     if (3 != decompress.output_components) {
         fputs ("not an RGB JPEG file\n", stderr);
-	fclose (f);
-	jpeg_destroy_decompress (&decompress);
-	return NULL;
+        fclose (f);
+        jpeg_destroy_decompress (&decompress);
+        return NULL;
     }
 
     // assume RGB
     if (NULL == (buf = (int8_t*) malloc (width * height * 3)) ||
-	NULL == (rows = (JSAMPLE**) malloc (height * sizeof (rows[0])))) {
-	if (NULL != buf) {free (buf);}
+        NULL == (rows = (JSAMPLE**) malloc (height * sizeof (rows[0])))) {
+        if (NULL != buf) {free (buf);}
         perror ("malloc");
-	fclose (f);
-	jpeg_destroy_decompress (&decompress);
-	return NULL;
+        fclose (f);
+        jpeg_destroy_decompress (&decompress);
+        return NULL;
     }
     for (i = 0; height > i; i++) {
         rows[i] = (JSAMPLE*) buf + i * width * 3;
@@ -146,8 +139,8 @@ load_jpeg_file (const char* fname, int32_t* w_ptr, int32_t* h_ptr)
     n_read = 0;
     while (decompress.output_scanline < height) {
         one_read = jpeg_read_scanlines (&decompress, rows + n_read, 
-					height - n_read);
-	n_read += one_read;
+                                        height - n_read);
+        n_read += one_read;
     }
 
     jpeg_finish_decompress (&decompress);
@@ -178,7 +171,7 @@ load_jpeg_file (const char* fname, int32_t* w_ptr, int32_t* h_ptr)
  */
 int32_t
 save_jpeg_file (const char* fname, int32_t width, int32_t height, 
-		int8_t* buf)
+                JSAMPLE* buf)
 {
     FILE* g;
     static struct jpeg_error_mgr jem;
@@ -188,16 +181,16 @@ save_jpeg_file (const char* fname, int32_t width, int32_t height,
 
     if (NULL == (g = fopen (fname, "wb"))) {
         perror ("fopen new");
-	return -1;
+        return -1;
     }
     if (NULL == (rows = (JSAMPARRAY) malloc (height * sizeof (rows[0])))) {
         perror ("malloc");
-	fclose (g);
-	jpeg_destroy_compress (&compress);
-	return -1;
+        fclose (g);
+        jpeg_destroy_compress (&compress);
+        return -1;
     }
     for (i = 0; height > i; i++) {
-        rows[i] = (JSAMPLE*) buf + i * width * 3;
+        rows[i] = buf + i * width * 3;
     }
 
     /* 
@@ -267,30 +260,30 @@ void find_edges (int32_t* edge, int32_t x_start, int32_t x_end, int32_t y_start,
     y_off = 3 * width;
     for (y = y_start, mid_img = mid_edge = 0; y < y_end; y++)
     {
-	for (x = x_start; x < x_end; x++, mid_edge++)
+        for (x = x_start; x < x_end; x++, mid_edge++)
         {
-	    up    = (0 < y ? -y_off : 0);
-	    down  = (height - 1 > y ? y_off : 0);
-	    left  = (0 < x ? -x_off : 0);
-	    right = (width - 1 > x ? x_off : 0);
-	    for (color = 0, g_sum = 0; color < 3; color++, mid_img++)
+            up    = (0 < y ? -y_off : 0);
+            down  = (height - 1 > y ? y_off : 0);
+            left  = (0 < x ? -x_off : 0);
+            right = (width - 1 > x ? x_off : 0);
+            for (color = 0, g_sum = 0; color < 3; color++, mid_img++)
             {
-	        g_x = GETJOCTET (buf[mid_img + up + right]) + 
-		      2 * GETJOCTET (buf[mid_img + right]) + 
-		      GETJOCTET (buf[mid_img + down + right]) - 
-		      GETJOCTET (buf[mid_img + up + left]) - 
-		      2 * GETJOCTET (buf[mid_img + left]) - 
-		      GETJOCTET (buf[mid_img + down + left]);
-	        g_y = GETJOCTET (buf[mid_img + down + left]) + 
-		      2 * GETJOCTET (buf[mid_img + down]) + 
-		      GETJOCTET (buf[mid_img + down + right]) - 
-		      GETJOCTET (buf[mid_img + up + left]) - 
-		      2 * GETJOCTET (buf[mid_img + up]) - 
-		      GETJOCTET (buf[mid_img + up + right]);
-		g_sum += g_x * g_x + g_y * g_y;
-	    }
-	    edge[mid_edge] = (thresh <= g_sum);
-	}
+                g_x = GETJOCTET (buf[mid_img + up + right]) + 
+                      2 * GETJOCTET (buf[mid_img + right]) + 
+                      GETJOCTET (buf[mid_img + down + right]) - 
+                      GETJOCTET (buf[mid_img + up + left]) - 
+                      2 * GETJOCTET (buf[mid_img + left]) - 
+                      GETJOCTET (buf[mid_img + down + left]);
+                g_y = GETJOCTET (buf[mid_img + down + left]) + 
+                      2 * GETJOCTET (buf[mid_img + down]) + 
+                      GETJOCTET (buf[mid_img + down + right]) - 
+                      GETJOCTET (buf[mid_img + up + left]) - 
+                      2 * GETJOCTET (buf[mid_img + up]) - 
+                      GETJOCTET (buf[mid_img + up + right]);
+                g_sum += g_x * g_x + g_y * g_y;
+            }
+            edge[mid_edge] = (thresh <= g_sum);
+        }
     }
 }
 
@@ -330,34 +323,34 @@ color_one_component (int32_t width, int32_t height, int32_t* edge,
     int32_t y;
 
     while (cq_head != cq_tail) {
-	x = cq[cq_head].x;
-	y = cq[cq_head].y;
+        x = cq[cq_head].x;
+        y = cq[cq_head].y;
         cq_head++;
 
-	if (0 < y && 0 == edge[(y - 1) * width + x]) {
-	    edge[(y - 1) * width + x] = color;
-	    cq[cq_tail].x = x;
-	    cq[cq_tail].y = y - 1;
-	    cq_tail++;
-	}
-	if (height - 1 > y && 0 == edge[(y + 1) * width + x]) {
-	    edge[(y + 1) * width + x] = color;
-	    cq[cq_tail].x = x;
-	    cq[cq_tail].y = y + 1;
-	    cq_tail++;
-	}
-	if (0 < x && 0 == edge[y * width + x - 1]) {
-	    edge[y * width + x - 1] = color;
-	    cq[cq_tail].x = x - 1;
-	    cq[cq_tail].y = y;
-	    cq_tail++;
-	}
-	if (width - 1 > x && 0 == edge[y * width + x + 1]) {
-	    edge[y * width + x + 1] = color;
-	    cq[cq_tail].x = x + 1;
-	    cq[cq_tail].y = y;
-	    cq_tail++;
-	}
+        if (0 < y && 0 == edge[(y - 1) * width + x]) {
+            edge[(y - 1) * width + x] = color;
+            cq[cq_tail].x = x;
+            cq[cq_tail].y = y - 1;
+            cq_tail++;
+        }
+        if (height - 1 > y && 0 == edge[(y + 1) * width + x]) {
+            edge[(y + 1) * width + x] = color;
+            cq[cq_tail].x = x;
+            cq[cq_tail].y = y + 1;
+            cq_tail++;
+        }
+        if (0 < x && 0 == edge[y * width + x - 1]) {
+            edge[y * width + x - 1] = color;
+            cq[cq_tail].x = x - 1;
+            cq[cq_tail].y = y;
+            cq_tail++;
+        }
+        if (width - 1 > x && 0 == edge[y * width + x + 1]) {
+            edge[y * width + x + 1] = color;
+            cq[cq_tail].x = x + 1;
+            cq[cq_tail].y = y;
+            cq_tail++;
+        }
     }
     return cq_tail;
 }
@@ -377,7 +370,7 @@ color_one_component (int32_t width, int32_t height, int32_t* edge,
  */
 static int32_t
 color_components (int32_t width, int32_t height, int32_t* edge, 
-		  int32_t** pix_count_ptr)
+                  int32_t** pix_count_ptr)
 {
     int32_t cur_col;
     int32_t x;
@@ -387,26 +380,25 @@ color_components (int32_t width, int32_t height, int32_t* edge,
     if (NULL == (cq = new comp_queue_t[width * height])) {
         return -1;
     }
-    if (NULL == (color_pixels = new int32_t[width * height] 
-    					)) {
-	free (cq);
+    if (NULL == (color_pixels = new int32_t[width * height])) {
+        free (cq);
         return -1;
     }
 
     cur_col = 2;
     for (y = 0; height > y; y++) {
-	for (x = 0; width > x; x++) {
-	    if (0 == edge[y * width + x]) {
-		edge[y * width + x] = cur_col;
-		cq[0].x = x;
-		cq[0].y = y;
-		cq_head = 0;
-		cq_tail = 1;
-	        color_pixels[cur_col] = color_one_component 
-			(width, height, edge, cur_col);
-	        cur_col++;
-	    }
-	}
+        for (x = 0; width > x; x++) {
+            if (0 == edge[y * width + x]) {
+                edge[y * width + x] = cur_col;
+                cq[0].x = x;
+                cq[0].y = y;
+                cq_head = 0;
+                cq_tail = 1;
+                color_pixels[cur_col] = color_one_component 
+                        (width, height, edge, cur_col);
+                cur_col++;
+            }
+        }
     }
 
     free (cq);
@@ -415,36 +407,77 @@ color_components (int32_t width, int32_t height, int32_t* edge,
     return cur_col;
 }
 
+void* thread_func (void* p)
+{
+    params_t *params = (params_t*) p;
+
+    find_edges (edges, params->x_start, params->x_end, params->y_start,
+                params->y_end, width, height, input_image, thresh);
+
+
+    // save some components...
+    //TODO: make this work
+
+    if (-1 == save_jpeg_file ("new.jpg", width, height, input_image)) {
+        return 2;
+    }
+
+    return NULL;
+}
+
+/*
+ * sample operation signature
+ */
+void
+operate (int32_t width, int32_t height, int8_t* buf, int num_cores)
+{
+  pthread_t *threads;
+
+  threads = new pthread_t[num_cores];
+  for(int i = 0; i < num_cores; i++)
+  {
+    int rc = pthread_create(threads+i, NULL, thread_func, NULL);
+    if (rc)
+    {
+      cout << "Failed to allocate thread #" << i << endl;
+      delete threads;
+      return;
+    }
+  }
+  pthread_exit(NULL);
+}
+
 static int32_t
 usage (const char* exec_name)
 {
     fprintf (stderr, "syntax: %s <jpg file> <threshold> <segment size>\n", 
-	     exec_name);
+             exec_name);
     return 2;
 }
 
 int
 main (int argc, char* argv[])
 {
-    int8_t* buf;
-    int32_t height;
-    int32_t width;
     char* after; 
-    double thresh;
+    double threshd;
     int32_t seg_size;
 
     if (4 != argc) {
-	return usage (argv[0]);
+        return usage (argv[0]);
     }
-    thresh = strtod (argv[2], &after);
+    threshd = strtod (argv[2], &after);
     if (argv[2] == after  || '\0' != *after) {
-	return usage (argv[0]);
+        return usage (argv[0]);
     }
+    thresh = ceil(threshd*threshd);
+
     seg_size = strtol (argv[3], &after, 10);
     if (argv[3] == after  || '\0' != *after) {
-	return usage (argv[0]);
+        return usage (argv[0]);
     }
-    if (NULL == (buf = load_jpeg_file (argv[1], &width, &height))) {
+
+    input_image = load_jpeg_file (argv[1], &width, &height);
+    if (input_image == NULL) {
         return 2;
     }
     
@@ -452,11 +485,9 @@ main (int argc, char* argv[])
 
     cout << num_cores << " cores" << endl;
 
-    operate (width, height, buf, num_cores);
-    if (-1 == save_jpeg_file ("new.jpg", width, height, buf)) {
-        return 2;
-    }
-    free (buf);
+    operate (num_cores);
+
+    free (input_image);
 
     return 0;
 }
