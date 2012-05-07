@@ -208,6 +208,195 @@ save_jpeg_file (const char* fname, int32_t width, int32_t height,
     return 0;
 }
 
+/*
+ * find_edges -- find and return an edge image based on an RGB image
+ * INPUTS: x_start -- start x location (inclusive)
+ *         x_end   -- ending x location (exclusive)
+ *         y_start -- start y location (inclusive)
+ *         y_end   -- ending y location (exclusive)
+ *         buf -- image data (array of rows, interleaved RGB)
+ *         thresh -- threshold for edge identification
+ * OUTPUTS: none
+ * RETURN VALUE: dynamically allocated buffer containing 2D array of
+ *               0/1-valued pixel data (array of rows, using one 32-bit
+ *               integer per pixel in original image)
+ * SIDE EFFECTS: dynamically allocates memory
+ */
+void find_edges (int32_t* edge, int32_t x_start, int32_t x_end,
+                 int32_t y_start, int32_t y_end, JSAMPLE* buf, int32_t thresh)
+{
+    int32_t* edge;
+    int32_t x;
+    int32_t y;
+    int32_t color;
+    int32_t mid_img;
+    int32_t mid_edge;
+    int32_t x_off;
+    int32_t y_off;
+    int32_t up;
+    int32_t down;
+    int32_t left;
+    int32_t right;
+    int32_t g_x;
+    int32_t g_y;
+    int32_t g_sum;
+
+    //if (NULL == (edge = calloc (width * height, sizeof (edge[0])))) {
+    //    return NULL;
+    //}
+
+    x_off = 3;
+    y_off = 3 * width;
+    for (y = y_start, mid_img = mid_edge = 0; y < y_end; y++)
+    {
+	for (x = x_start; x < x_end; x++, mid_edge++)
+        {
+	    up    = (0 < y ? -y_off : 0);
+	    down  = (height - 1 > y ? y_off : 0);
+	    left  = (0 < x ? -x_off : 0);
+	    right = (width - 1 > x ? x_off : 0);
+	    for (color = 0, g_sum = 0; color < 3; color++, mid_img++)
+            {
+	        g_x = GETJOCTET (buf[mid_img + up + right]) + 
+		      2 * GETJOCTET (buf[mid_img + right]) + 
+		      GETJOCTET (buf[mid_img + down + right]) - 
+		      GETJOCTET (buf[mid_img + up + left]) - 
+		      2 * GETJOCTET (buf[mid_img + left]) - 
+		      GETJOCTET (buf[mid_img + down + left]);
+	        g_y = GETJOCTET (buf[mid_img + down + left]) + 
+		      2 * GETJOCTET (buf[mid_img + down]) + 
+		      GETJOCTET (buf[mid_img + down + right]) - 
+		      GETJOCTET (buf[mid_img + up + left]) - 
+		      2 * GETJOCTET (buf[mid_img + up]) - 
+		      GETJOCTET (buf[mid_img + up + right]);
+		g_sum += g_x * g_x + g_y * g_y;
+	    }
+	    edge[mid_edge] = (thresh <= g_sum);
+	}
+    }
+}
+
+
+/*
+ * We use a queue (BFS) for connected components to avoid long, snake-like 
+ * paths and long queues (as opposed to rings in the image and short queues).
+ * DFS may still be faster on large images because of cache effects, but
+ * wasn't tested.
+ */
+typedef struct comp_queue_t comp_queue_t;
+struct comp_queue_t {
+    int32_t x;
+    int32_t y;
+};
+static comp_queue_t* cq;
+static int32_t cq_head;
+static int32_t cq_tail;
+
+
+/*
+ * color_one_component -- flood fill a color into an edge image
+ *                        (helper routine for color_components)
+ * INPUTS: width -- image width in pixels
+ *         height -- image height in pixels
+ *         edge -- edge/color data (array of rows)
+ *         color -- fill color
+ * OUTPUTS: none
+ * RETURN VALUE: number of pixels colored
+ * SIDE EFFECTS: the queue cq MUST be initialized before calling this routine
+ */
+static int32_t
+color_one_component (int32_t width, int32_t height, int32_t* edge, 
+                     int32_t color)
+{
+    int32_t x;
+    int32_t y;
+
+    while (cq_head != cq_tail) {
+	x = cq[cq_head].x;
+	y = cq[cq_head].y;
+        cq_head++;
+
+	if (0 < y && 0 == edge[(y - 1) * width + x]) {
+	    edge[(y - 1) * width + x] = color;
+	    cq[cq_tail].x = x;
+	    cq[cq_tail].y = y - 1;
+	    cq_tail++;
+	}
+	if (height - 1 > y && 0 == edge[(y + 1) * width + x]) {
+	    edge[(y + 1) * width + x] = color;
+	    cq[cq_tail].x = x;
+	    cq[cq_tail].y = y + 1;
+	    cq_tail++;
+	}
+	if (0 < x && 0 == edge[y * width + x - 1]) {
+	    edge[y * width + x - 1] = color;
+	    cq[cq_tail].x = x - 1;
+	    cq[cq_tail].y = y;
+	    cq_tail++;
+	}
+	if (width - 1 > x && 0 == edge[y * width + x + 1]) {
+	    edge[y * width + x + 1] = color;
+	    cq[cq_tail].x = x + 1;
+	    cq[cq_tail].y = y;
+	    cq_tail++;
+	}
+    }
+    return cq_tail;
+}
+
+/*
+ * color_components -- identify connected components in an edge image
+ * INPUTS: width -- image width in pixels
+ *         height -- image height in pixels
+ *         edge -- edge data with one 32-bit integer per pixel (0 or 1)
+ * OUTPUTS: edge -- colored image using distinct integer values (2+)
+ *                  for each image component (separated by edges w/value 1)
+ *          pix_count_ptr -- a dynamically-allocated array of pixel counts
+ *                           by color (coo
+ * RETURN VALUE: -1 on failure, (# colors needed + 2) on success (the value 1
+ *               represents edges, so color values start at 2)
+ * SIDE EFFECTS: dynamically allocates memory
+ */
+static int32_t
+color_components (int32_t width, int32_t height, int32_t* edge, 
+		  int32_t** pix_count_ptr)
+{
+    int32_t cur_col;
+    int32_t x;
+    int32_t y;
+    int32_t* color_pixels;
+
+    if (NULL == (cq = malloc (width * height * sizeof (cq[0])))) {
+        return -1;
+    }
+    if (NULL == (color_pixels = malloc (width * height * 
+    					sizeof (color_pixels[0])))) {
+	free (cq);
+        return -1;
+    }
+
+    cur_col = 2;
+    for (y = 0; height > y; y++) {
+	for (x = 0; width > x; x++) {
+	    if (0 == edge[y * width + x]) {
+		edge[y * width + x] = cur_col;
+		cq[0].x = x;
+		cq[0].y = y;
+		cq_head = 0;
+		cq_tail = 1;
+	        color_pixels[cur_col] = color_one_component 
+			(width, height, edge, cur_col);
+	        cur_col++;
+	    }
+	}
+    }
+
+    free (cq);
+    *pix_count_ptr = color_pixels;
+
+    return cur_col;
+}
+
 static int32_t
 usage (const char* exec_name)
 {
