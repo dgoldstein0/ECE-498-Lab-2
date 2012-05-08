@@ -37,6 +37,7 @@
 #include <jpeglib.h>
 #include <iostream>
 #include <math.h>
+#include <vector>
 
 using namespace std;
 
@@ -45,8 +46,12 @@ struct params_t {
     int32_t x_end;
     int32_t y_start;
     int32_t y_end;
+    int32_t thread_num;
 
-    params_t(int32_t x_s, int32_t x_e, int32_t y_s, int32_t y_e) : x_start(x_s), x_end(x_e), y_start(y_s), y_end(y_e)
+    params_t(int32_t x_s, int32_t x_e,
+             int32_t y_s, int32_t y_e,
+             int32_t t_num) : x_start(x_s), x_end(x_e), y_start(y_s),
+                              y_end(y_e), thread_num(t_num)
     {
     }
 };
@@ -69,7 +74,7 @@ static int32_t thresh;
  * INPUTS: fname -- name of JPEG file
  * OUTPUTS: *w_ptr -- image width in pixels
  *          *h_ptr -- image height in pixels
- * RETURN VALUE: dynamically allocated buffer containing 2D array of
+ * RETURN VALUE: dynamically allocated buffer (with new[]) containing 2D array of
  *               3-byte RGB data per pixel; linearized as top to bottom,
  *               left to right, so first byte is R of upper left, then
  *               G, then B, followed by pixel to right of upper left
@@ -91,7 +96,8 @@ load_jpeg_file (const char* fname, int32_t* w_ptr, int32_t* h_ptr)
     uint32_t height;
     uint32_t width;
 
-    if (NULL == (f = fopen (fname, "rb"))) {
+    if (NULL == (f = fopen (fname, "rb")))
+    {
         perror ("fopen");
         return NULL;
     }
@@ -257,9 +263,6 @@ void find_edges (int32_t* edge, int32_t x_start, int32_t x_end, int32_t y_start,
     int32_t g_y;
     int32_t g_sum;
 
-    //if (NULL == (edge = calloc (width * height, sizeof (edge[0])))) {
-    //    return NULL;
-    //}
 
     x_off = 3;
     y_off = 3 * width;
@@ -304,9 +307,6 @@ struct comp_queue_t {
     int32_t x;
     int32_t y;
 };
-static comp_queue_t* cq;
-static int32_t cq_head;
-static int32_t cq_tail;
 
 
 /*
@@ -318,39 +318,45 @@ static int32_t cq_tail;
  *         color -- fill color
  * OUTPUTS: none
  * RETURN VALUE: number of pixels colored
- * SIDE EFFECTS: the queue cq MUST be initialized before calling this routine
  */
 static int32_t
-color_one_component (int32_t width, int32_t height, int32_t* edge, 
+color_one_component (comp_queue_t* cq, int32_t x_start, int32_t x_end,
+                     int32_t y_start, int32_t y_end,
+                     int32_t width, int32_t height, int32_t* edge, 
                      int32_t color)
 {
     int32_t x;
     int32_t y;
+
+
+
+    int32_t cq_head = 0;
+    int32_t cq_tail = 1;
 
     while (cq_head != cq_tail) {
         x = cq[cq_head].x;
         y = cq[cq_head].y;
         cq_head++;
 
-        if (0 < y && 0 == edge[(y - 1) * width + x]) {
+        if (y_start < y && 0 == edge[(y - 1) * width + x]) {
             edge[(y - 1) * width + x] = color;
             cq[cq_tail].x = x;
             cq[cq_tail].y = y - 1;
             cq_tail++;
         }
-        if (height - 1 > y && 0 == edge[(y + 1) * width + x]) {
+        if (y_end > y + 1 && 0 == edge[(y + 1) * width + x]) {
             edge[(y + 1) * width + x] = color;
             cq[cq_tail].x = x;
             cq[cq_tail].y = y + 1;
             cq_tail++;
         }
-        if (0 < x && 0 == edge[y * width + x - 1]) {
+        if (x_start < x && 0 == edge[y * width + x - 1]) {
             edge[y * width + x - 1] = color;
             cq[cq_tail].x = x - 1;
             cq[cq_tail].y = y;
             cq_tail++;
         }
-        if (width - 1 > x && 0 == edge[y * width + x + 1]) {
+        if (x_end > x + 1 && 0 == edge[y * width + x + 1]) {
             edge[y * width + x + 1] = color;
             cq[cq_tail].x = x + 1;
             cq[cq_tail].y = y;
@@ -374,51 +380,62 @@ color_one_component (int32_t width, int32_t height, int32_t* edge,
  * SIDE EFFECTS: dynamically allocates memory
  */
 static int32_t
-color_components (int32_t width, int32_t height, int32_t* edge, 
-                  int32_t** pix_count_ptr)
+color_components (int32_t x_start, int32_t x_end, int32_t y_start,
+                  int32_t y_end, int32_t width, int32_t height, int32_t* edge,
+                  vector<int32_t>** pix_count_ptr, int32_t thread_num)
 {
     int32_t cur_col;
     int32_t x;
     int32_t y;
-    int32_t* color_pixels;
+    vector<int32_t> *color_pixels = new vector<int32_t>();
+    comp_queue_t* cq = new comp_queue_t[(x_end - x_start) * (y_end - y_start)];
 
-    if (NULL == (cq = new comp_queue_t[width * height])) {
+    if (color_pixels == NULL || cq == NULL)
+    {
+        delete color_pixels; //It is safe to delete null
+        delete [] cq;
         return -1;
     }
-    if (NULL == (color_pixels = new int32_t[width * height])) {
-        free (cq);
-        return -1;
-    }
+
+    //insert entries for 0 and 1, since they aren't used as colors
+    color_pixels->push_back(0);
+    color_pixels->push_back(0);
 
     cur_col = 2;
-    for (y = 0; height > y; y++) {
-        for (x = 0; width > x; x++) {
+    for (y = y_start; y < y_end; y++) {
+        for (x = x_start; x < x_end; x++) {
             if (0 == edge[y * width + x]) {
                 edge[y * width + x] = cur_col;
                 cq[0].x = x;
                 cq[0].y = y;
-                cq_head = 0;
-                cq_tail = 1;
-                color_pixels[cur_col] = color_one_component 
-                        (width, height, edge, cur_col);
+                color_pixels->push_back(
+                    color_one_component(
+                        cq, x_start, x_end, y_start, y_end,
+                        width, height, edge, cur_col | (thread_num << 16)
+                    )
+                );
+
                 cur_col++;
             }
         }
     }
 
-    free (cq);
+    delete [] cq;
     *pix_count_ptr = color_pixels;
 
     return cur_col;
 }
 
-void* thread_func (void* p)
+void* thread_func (void* param)
 {
-    params_t *params = (params_t*) p;
+    params_t *p = (params_t*) param;
+    vector<int32_t> *pix_count_ptr;
 
-    find_edges (edges, params->x_start, params->x_end, params->y_start,
-                params->y_end, width, height, input_image, thresh);
+    find_edges (edges, p->x_start, p->x_end, p->y_start,
+                p->y_end, width, height, input_image, thresh);
 
+    color_components (p->x_start, p->x_end, p->y_start, p->y_end,
+                      width, height, edges, &pix_count_ptr, p->thread_num);
 
     // save some components...
     //TODO: make this work
@@ -427,6 +444,8 @@ void* thread_func (void* p)
         cout << "save_jpeg_file returned -1 "<< endl;
         return NULL;
     }
+
+    delete p;
 
     return NULL;
 }
@@ -442,17 +461,21 @@ operate (int num_cores)
     threads = new pthread_t[num_cores];
     for(int i = 0; i < num_cores; i++)
     {
-        params_t *param = new params_t(0, width, (i*height)/num_cores, ((i+1)*height)/num_cores);
+        params_t *param = new params_t(0, width, (i*height)/num_cores, ((i+1)*height)/num_cores, i);
 
         int rc = pthread_create(threads+i, NULL, thread_func, param);
         if (rc)
         {
             cout << "Failed to allocate thread #" << i << endl;
-            delete threads;
+            delete [] threads;
             return;
         }
     }
-    pthread_exit(NULL);
+
+    for (int i = 0; i < num_cores; i++)
+    {
+        pthread_join(threads[i], NULL);
+    }
 }
 
 static int32_t
@@ -488,14 +511,21 @@ main (int argc, char* argv[])
     if (input_image == NULL) {
         return 2;
     }
-    
+
+    edges = (int32_t*) calloc (width * height, sizeof (edges[0]));
+    if (edges == NULL) {
+        delete [] input_image;
+        return 2;
+    }
+
     int num_cores = sysconf( _SC_NPROCESSORS_ONLN );
 
     cout << num_cores << " cores" << endl;
 
     operate (num_cores);
 
-    free (input_image);
+    free (edges);
+    delete [] input_image;
 
     return 0;
 }
