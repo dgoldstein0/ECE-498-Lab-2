@@ -461,7 +461,11 @@ void set_union(int32_t a, int32_t b)
 	important because we don't want to set the head to point to itself
 	or mess up the size count - which this code would do.*/
 
-	if(seta==setb) return;
+	if(seta==setb)
+    {
+        pthread_mutex_unlock(&dsets_lock);
+        return;
+    }
 	
     int32_t value1 = dsets[seta >> 16][seta & 0xFFFF];
     int32_t value2 = dsets[setb >> 16][setb & 0xFFFF];
