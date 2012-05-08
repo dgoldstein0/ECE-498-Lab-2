@@ -47,11 +47,14 @@ struct params_t {
     int32_t y_start;
     int32_t y_end;
     int32_t thread_num;
+    int32_t num_threads;
 
     params_t(int32_t x_s, int32_t x_e,
              int32_t y_s, int32_t y_e,
-             int32_t t_num) : x_start(x_s), x_end(x_e), y_start(y_s),
-                              y_end(y_e), thread_num(t_num)
+             int32_t t_num, int32_t n_threads) : x_start(x_s), x_end(x_e),
+                                                 y_start(y_s), y_end(y_e),
+                                                 thread_num(t_num),
+                                                 num_threads(n_threads)
     {
     }
 };
@@ -68,6 +71,9 @@ static JSAMPLE* input_image;
 
 //The square of the threshold
 static int32_t thresh;
+
+//The minimum segment size
+static int32_t seg_size;
 
 static pthread_barrier_t barrier;
 
@@ -145,13 +151,16 @@ load_jpeg_file (const char* fname, int32_t* w_ptr, int32_t* h_ptr)
 
     // assume RGB
     if (NULL == (buf = new JSAMPLE[width * height * 3]) ||
-        NULL == (rows = (JSAMPLE**) malloc (height * sizeof (rows[0])))) {
+        NULL == (rows = (JSAMPLE**) malloc (height * sizeof (rows[0]))))
+    {
         if (NULL != buf) {delete [] buf;}
+
         perror ("malloc");
         fclose (f);
         jpeg_destroy_decompress (&decompress);
         return NULL;
     }
+
     for (i = 0; height > i; i++) {
         rows[i] = (JSAMPLE*) buf + i * width * 3;
     }
@@ -275,14 +284,17 @@ void find_edges (int32_t* edge, int32_t x_start, int32_t x_end, int32_t y_start,
 
     x_off = 3;
     y_off = 3 * width;
-    for (y = y_start, mid_img = mid_edge = 0; y < y_end; y++)
+    for (y = y_start; y < y_end; y++)
     {
-        for (x = x_start; x < x_end; x++, mid_edge++)
+        for (x = x_start; x < x_end; x++)
         {
             up    = (0 < y ? -y_off : 0);
             down  = (height - 1 > y ? y_off : 0);
             left  = (0 < x ? -x_off : 0);
             right = (width - 1 > x ? x_off : 0);
+
+            mid_edge = x + y*width;
+            mid_img = 3*x + y*width*3;
             for (color = 0, g_sum = 0; color < 3; color++, mid_img++)
             {
                 g_x = GETJOCTET (buf[mid_img + up + right]) + 
@@ -408,7 +420,7 @@ color_components (int32_t x_start, int32_t x_end, int32_t y_start,
     color_pixels->push_back(0);
     color_pixels->push_back(0);
 
-    cur_col = 2;
+    cur_col = 2 | (thread_num << 16);
     for (y = y_start; y < y_end; y++) {
         for (x = x_start; x < x_end; x++) {
             if (0 == edge[y * width + x]) {
@@ -418,7 +430,7 @@ color_components (int32_t x_start, int32_t x_end, int32_t y_start,
                 color_pixels->push_back(
                     color_one_component(
                         cq, x_start, x_end, y_start, y_end,
-                        width, height, edge, cur_col | (thread_num << 16)
+                        width, height, edge, cur_col
                     )
                 );
 
@@ -430,57 +442,63 @@ color_components (int32_t x_start, int32_t x_end, int32_t y_start,
     delete [] cq;
     *pix_count_ptr = color_pixels;
 
-    return cur_col;
+    fprintf(stderr, "Thread %d found %d colors\n", thread_num, cur_col - (thread_num << 16));
+
+    return cur_col - (thread_num << 16);
 }
 
 pair<int32_t, int32_t> find(int32_t num)
 {
-	int32_t value = dsets[num >> 16][num & 0xFFFF];
-	if(value < 0)
-		return pair<int32_t, int32_t>(num, -value);
-	else
-		return find(value);
+    //fprintf(stderr, "Called find on %d\n", num);
+    if ((dsets.size() <= (num >> 16)) || (dsets[num>>16].size() <= (num & 0xFFFF)))
+        fprintf(stderr, "Out of bounds access: num is %x, dsets.size() is  %x, dsets[num >> 16].size() is %x\n", num, dsets.size(), dsets[num>>16].size());
+
+    int32_t value = dsets[num >> 16][num & 0xFFFF];
+    if(value <= 0)
+        return pair<int32_t, int32_t>(num, -value);
+    else
+        return find(value);
 }
 
 int32_t find_and_compress(int32_t num)
 {
-	int32_t value = dsets[num >> 16][num & 0xFFFF];
-	if(value < 0)
-		return num;
-	else
-		return dsets[num >> 16][num & 0xFFFF] = find_and_compress(value);
+    int32_t value = dsets[num >> 16][num & 0xFFFF];
+    if(value <= 0)
+        return num;
+    else
+        return dsets[num >> 16][num & 0xFFFF] = find_and_compress(value);
 }
 
 void set_union(int32_t a, int32_t b)
 {
     pthread_mutex_lock(&dsets_lock);
-	int32_t seta = find_and_compress(a);
-	int32_t setb = find_and_compress(b);
-	
-	/*do nothing if a and b are already in the same set.  This is
-	important because we don't want to set the head to point to itself
-	or mess up the size count - which this code would do.*/
+    int32_t seta = find_and_compress(a);
+    int32_t setb = find_and_compress(b);
+    
+    /*do nothing if a and b are already in the same set.  This is
+    important because we don't want to set the head to point to itself
+    or mess up the size count - which this code would do.*/
 
-	if(seta==setb)
+    if(seta==setb)
     {
         pthread_mutex_unlock(&dsets_lock);
         return;
     }
-	
+    
     int32_t value1 = dsets[seta >> 16][seta & 0xFFFF];
     int32_t value2 = dsets[setb >> 16][setb & 0xFFFF];
-	int32_t newsize = value1 + value2;
+    int32_t newsize = value1 + value2;
 
-	if(value1 > value2)
-	{
-		dsets[seta >> 16][seta & 0xFFFF] = setb;
-		dsets[setb >> 16][setb & 0xFFFF] = newsize;
-	}
-	else
-	{
-		dsets[seta >> 16][seta & 0xFFFF] = newsize;
-		dsets[setb >> 16][setb & 0xFFFF] = seta;
-	}
+    if(value1 > value2)
+    {
+        dsets[seta >> 16][seta & 0xFFFF] = setb;
+        dsets[setb >> 16][setb & 0xFFFF] = newsize;
+    }
+    else
+    {
+        dsets[seta >> 16][seta & 0xFFFF] = newsize;
+        dsets[setb >> 16][setb & 0xFFFF] = seta;
+    }
 
     pthread_mutex_unlock(&dsets_lock);
 }
@@ -519,24 +537,113 @@ void union_at_boundaries(int32_t x_start, int32_t x_end, int32_t y_start, int32_
     }
 }
 
+/*
+ * write_new_image -- write one output image based on component + image data;
+ *                    new image contains portion of original image 
+ *                    corresponding to a given color; other pixels are black
+ * INPUTS: width -- image width in pixels
+ *         height -- image height in pixels
+ *         buf -- image data in 3-byte RGB form, top to bottom, left to right
+ *                (English reading order)
+ *         edge -- edge/color data (array of rows)
+ *         color -- component color for image extraction
+ *         img_num -- image id for output file name
+ * OUTPUTS: none
+ * RETURN VALUE: 0 on success, -1 on failure
+ * SIDE EFFECTS: writes a file (see also save_jpeg_file for other side
+ *               effects)
+ */
+static int32_t
+write_new_image (int32_t width, int32_t height, JSAMPLE* buf, int32_t* edge, 
+                 int32_t color, int32_t img_num)
+{
+    JSAMPLE* new_buf;
+    char fname[30];
+    int32_t x;
+    int32_t y;
+    int32_t mid;
+    int32_t ret_val;
+
+    fprintf(stderr, "Writing img_num %d with color %x\n", img_num, color);
+
+    if (NULL == (new_buf = new JSAMPLE[width * height * 3]))
+    {
+        return -1;
+    }
+
+    for (y = 0, mid = 0; height > y; y++) {
+        for (x = 0; width > x; x++) {
+            if (color == find(edge[y * width + x]).first) {
+                new_buf[mid] = buf[mid];
+                new_buf[mid + 1] = buf[mid + 1];
+                new_buf[mid + 2] = buf[mid + 2];
+            } else {
+                new_buf[mid] = new_buf[mid + 1] = new_buf[mid + 2] = 0;
+            }
+            mid += 3;
+        }
+    }
+    sprintf (fname, "output%d.jpg", img_num);
+    ret_val = save_jpeg_file (fname, width, height, new_buf);
+    delete [] new_buf;
+
+    return (-1 == ret_val ? -1 : 0);
+}
+
 void* thread_func (void* param)
 {
     params_t *p = (params_t*) param;
     vector<int32_t> *pix_count_ptr;
+
+    printf("x_start: %d, x_end: %d, y_start: %d, y_end: %d\n", p->x_start, p->x_end, p->y_start, p->y_end);
 
     //Phase 1: find edges and local components
 
     find_edges (edges, p->x_start, p->x_end, p->y_start,
                 p->y_end, width, height, input_image, thresh);
 
+    //sanity check:
+    pthread_barrier_wait(&barrier);
+
+    for (int y=0; y < height; y++)
+    {
+        for (int x=0; x < width; x++)
+        {
+            int32_t val = edges[x+y*width];
+            if (val != 0 && val != 1)
+                fprintf(stderr, "Sanity error! edge at (%d,%d) is %d\n", x, y, val);
+        }
+    }
+
+    pthread_barrier_wait(&barrier);
+
+    //end sanity check
+
     int32_t num_colors = color_components (
                             p->x_start, p->x_end, p->y_start, p->y_end,
                             width, height, edges, &pix_count_ptr, p->thread_num
-                         ) - 2;
+                         );
 
     //And set up dsets
     for (int i=0; i < num_colors; i++)
         dsets[p->thread_num].push_back(-(*pix_count_ptr)[i]);
+
+    delete pix_count_ptr;
+
+    //sanity check 2:
+    pthread_barrier_wait(&barrier);
+
+    for (int y=0; y < height; y++)
+    {
+        for (int x=0; x < width; x++)
+        {
+            int32_t val = edges[x+y*width];
+            if ((val >> 16) < 0 || (val >> 16) >=  p->num_threads || (val & 0xFFFF) < 0 || (val & 0xFFFF) >= dsets[val>>16].size())
+                fprintf(stderr, "Sanity 2 error! edge at (%d,%d) is %d\n", x, y, val);
+        }
+    }
+    //end sanity check 2
+
 
     pthread_barrier_wait(&barrier);
     //Phase 2: scan boundaries and union if necessary
@@ -544,16 +651,23 @@ void* thread_func (void* param)
     union_at_boundaries(p->x_start, p->x_end, p->y_start, p->y_end, p->thread_num);
 
     pthread_barrier_wait(&barrier);
-    //Phase 3: write out images.  This will take a bit of load balancing.
+    //Phase 3: write out images.  This load balancing is really dumb.
 
-
-
-    // save some components...
-    //TODO: make this work
-
-    if (-1 == save_jpeg_file ("new.jpg", width, height, input_image)) {
-        cout << "save_jpeg_file returned -1 "<< endl;
-        return NULL;
+    int components_seen = 0;
+    for (int i=0; i < p->num_threads; i++)
+    {
+        for (uint32_t j = 2; j < dsets[i].size(); j++)
+        {
+            if (dsets[i][j] <= -seg_size)
+            {
+                //this test is for load balancing
+                if (components_seen % p->num_threads == p->thread_num)
+                {
+                    write_new_image(width, height, input_image, edges, (i << 16) | j, components_seen);
+                }
+                components_seen++;
+            }
+        }
     }
 
     delete p;
@@ -576,7 +690,7 @@ operate (int num_cores)
     for(int i = 0; i < num_cores; i++)
     {
         dsets.push_back(vector<int>());
-        params_t *param = new params_t(0, width, (i*height)/num_cores, ((i+1)*height)/num_cores, i);
+        params_t *param = new params_t(0, width, (i*height)/num_cores, ((i+1)*height)/num_cores, i, num_cores);
 
         int rc = pthread_create(threads+i, NULL, thread_func, param);
         if (rc)
@@ -591,6 +705,8 @@ operate (int num_cores)
     {
         pthread_join(threads[i], NULL);
     }
+
+    delete [] threads;
 
     pthread_barrier_destroy(&barrier);
 }
@@ -608,7 +724,6 @@ main (int argc, char* argv[])
 {
     char* after; 
     double threshd;
-    int32_t seg_size;
 
     if (4 != argc) {
         return usage (argv[0]);
