@@ -638,7 +638,7 @@ void* thread_func (void* param)
         for (int x=0; x < width; x++)
         {
             int32_t val = edges[x+y*width];
-            if ((val >> 16) < 0 || (val >> 16) >=  p->num_threads || (val & 0xFFFF) < 0 || (val & 0xFFFF) >= dsets[val>>16].size())
+            if ((val >> 16) < 0 || (val >> 16) >=  p->num_threads || (val & 0xFFFF) < 1 || (val & 0xFFFF) >= dsets[val>>16].size())
                 fprintf(stderr, "Sanity 2 error! edge at (%d,%d) is %d\n", x, y, val);
         }
     }
