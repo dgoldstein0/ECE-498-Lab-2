@@ -69,6 +69,15 @@ static JSAMPLE* input_image;
 //The square of the threshold
 static int32_t thresh;
 
+static pthread_barrier_t barrier;
+
+//datastore for disjoint sets structure
+//First layer  = thread number
+//Second layer = color
+static vector<vector<int32_t> > dsets;
+static pthread_mutex_t dsets_lock = PTHREAD_MUTEX_INITIALIZER;
+
+
 /*
  * load_jpeg_file -- load a JPEG from a file into an RGB pixel format
  * INPUTS: fname -- name of JPEG file
@@ -328,8 +337,6 @@ color_one_component (comp_queue_t* cq, int32_t x_start, int32_t x_end,
     int32_t x;
     int32_t y;
 
-
-
     int32_t cq_head = 0;
     int32_t cq_tail = 1;
 
@@ -426,16 +433,116 @@ color_components (int32_t x_start, int32_t x_end, int32_t y_start,
     return cur_col;
 }
 
+pair<int32_t, int32_t> find(int32_t num)
+{
+	int32_t value = dsets[num >> 16][num & 0xFFFF];
+	if(value < 0)
+		return pair<int32_t, int32_t>(num, -value);
+	else
+		return find(value);
+}
+
+int32_t find_and_compress(int32_t num)
+{
+	int32_t value = dsets[num >> 16][num & 0xFFFF];
+	if(value < 0)
+		return num;
+	else
+		return dsets[num >> 16][num & 0xFFFF] = find_and_compress(value);
+}
+
+void set_union(int32_t a, int32_t b)
+{
+    pthread_mutex_lock(&dsets_lock);
+	int32_t seta = find_and_compress(a);
+	int32_t setb = find_and_compress(b);
+	
+	/*do nothing if a and b are already in the same set.  This is
+	important because we don't want to set the head to point to itself
+	or mess up the size count - which this code would do.*/
+
+	if(seta==setb) return;
+	
+    int32_t value1 = dsets[seta >> 16][seta & 0xFFFF];
+    int32_t value2 = dsets[setb >> 16][setb & 0xFFFF];
+	int32_t newsize = value1 + value2;
+
+	if(value1 > value2)
+	{
+		dsets[seta >> 16][seta & 0xFFFF] = setb;
+		dsets[setb >> 16][setb & 0xFFFF] = newsize;
+	}
+	else
+	{
+		dsets[seta >> 16][seta & 0xFFFF] = newsize;
+		dsets[setb >> 16][setb & 0xFFFF] = seta;
+	}
+
+    pthread_mutex_unlock(&dsets_lock);
+}
+
+void union_at_boundaries(int32_t x_start, int32_t x_end, int32_t y_start, int32_t y_end, int32_t thread_num)
+{
+    //Only look at bottom and right edges of rectangle; other threads will handle rest
+
+    //bottom edge
+    if (y_end != height)
+    {
+        for (int x = x_start; x < x_end; x++)
+        {
+            int32_t color1 = edges[x + y_end*width];
+            int32_t color2 = edges[x+(y_end+1)*width];
+            if (color1 >= 2  && color2 >= 2)
+            {
+                //union these!
+                set_union(color1, color2);
+            }
+        }
+    }
+
+    if (x_end != width)
+    {
+        for (int y = y_start; y < y_end; y++)
+        {
+            int32_t color1 = edges[x_end     + y*width];
+            int32_t color2 = edges[x_end + 1 + y*width];
+            if (color1 >= 2  && color2 >= 2)
+            {
+                //union these!
+                set_union(color1, color2);
+            }
+        }
+    }
+}
+
 void* thread_func (void* param)
 {
     params_t *p = (params_t*) param;
     vector<int32_t> *pix_count_ptr;
 
+    //Phase 1: find edges and local components
+
     find_edges (edges, p->x_start, p->x_end, p->y_start,
                 p->y_end, width, height, input_image, thresh);
 
-    color_components (p->x_start, p->x_end, p->y_start, p->y_end,
-                      width, height, edges, &pix_count_ptr, p->thread_num);
+    int32_t num_colors = color_components (
+                            p->x_start, p->x_end, p->y_start, p->y_end,
+                            width, height, edges, &pix_count_ptr, p->thread_num
+                         ) - 2;
+
+    //And set up dsets
+    for (int i=0; i < num_colors; i++)
+        dsets[p->thread_num].push_back(-(*pix_count_ptr)[i]);
+
+    pthread_barrier_wait(&barrier);
+    //Phase 2: scan boundaries and union if necessary
+
+    union_at_boundaries(p->x_start, p->x_end, p->y_start, p->y_end, p->thread_num);
+
+    pthread_barrier_wait(&barrier);
+    //Phase 3: write out images.  This will take a bit of load balancing.
+
+
 
     // save some components...
     //TODO: make this work
@@ -451,16 +558,20 @@ void* thread_func (void* param)
 }
 
 /*
- * sample operation signature
+ * does everything
  */
 void
 operate (int num_cores)
 {
     pthread_t *threads;
 
+    //initialization
     threads = new pthread_t[num_cores];
+    pthread_barrier_init(&barrier, NULL, num_cores);
+
     for(int i = 0; i < num_cores; i++)
     {
+        dsets.push_back(vector<int>());
         params_t *param = new params_t(0, width, (i*height)/num_cores, ((i+1)*height)/num_cores, i);
 
         int rc = pthread_create(threads+i, NULL, thread_func, param);
@@ -476,6 +587,8 @@ operate (int num_cores)
     {
         pthread_join(threads[i], NULL);
     }
+
+    pthread_barrier_destroy(&barrier);
 }
 
 static int32_t
