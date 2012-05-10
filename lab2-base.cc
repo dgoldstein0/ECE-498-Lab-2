@@ -442,7 +442,7 @@ color_components (int32_t x_start, int32_t x_end, int32_t y_start,
     delete [] cq;
     *pix_count_ptr = color_pixels;
 
-    fprintf(stderr, "Thread %d found %d colors\n", thread_num, cur_col - (thread_num << 16));
+    //fprintf(stderr, "Thread %d found %d colors\n", thread_num, cur_col - (thread_num << 16));
 
     return cur_col - (thread_num << 16);
 }
@@ -450,8 +450,10 @@ color_components (int32_t x_start, int32_t x_end, int32_t y_start,
 pair<int32_t, int32_t> find(int32_t num)
 {
     //fprintf(stderr, "Called find on %d\n", num);
+    /*
     if ((dsets.size() <= (num >> 16)) || (dsets[num>>16].size() <= (num & 0xFFFF)))
         fprintf(stderr, "Out of bounds access: num is %x, dsets.size() is  %x, dsets[num >> 16].size() is %x\n", num, dsets.size(), dsets[num>>16].size());
+    */
 
     int32_t value = dsets[num >> 16][num & 0xFFFF];
     if(value <= 0)
@@ -564,7 +566,7 @@ write_new_image (int32_t width, int32_t height, JSAMPLE* buf, int32_t* edge,
     int32_t mid;
     int32_t ret_val;
 
-    fprintf(stderr, "Writing img_num %d with color %x\n", img_num, color);
+    //fprintf(stderr, "Writing img_num %d with color %x\n", img_num, color);
 
     if (NULL == (new_buf = new JSAMPLE[width * height * 3]))
     {
@@ -595,13 +597,14 @@ void* thread_func (void* param)
     params_t *p = (params_t*) param;
     vector<int32_t> *pix_count_ptr;
 
-    printf("x_start: %d, x_end: %d, y_start: %d, y_end: %d\n", p->x_start, p->x_end, p->y_start, p->y_end);
+    //printf("x_start: %d, x_end: %d, y_start: %d, y_end: %d\n", p->x_start, p->x_end, p->y_start, p->y_end);
 
     //Phase 1: find edges and local components
 
     find_edges (edges, p->x_start, p->x_end, p->y_start,
                 p->y_end, width, height, input_image, thresh);
 
+    /*
     //sanity check:
     pthread_barrier_wait(&barrier);
 
@@ -618,6 +621,7 @@ void* thread_func (void* param)
     pthread_barrier_wait(&barrier);
 
     //end sanity check
+    */
 
     int32_t num_colors = color_components (
                             p->x_start, p->x_end, p->y_start, p->y_end,
@@ -630,6 +634,7 @@ void* thread_func (void* param)
 
     delete pix_count_ptr;
 
+    /*
     //sanity check 2:
     pthread_barrier_wait(&barrier);
 
@@ -643,7 +648,7 @@ void* thread_func (void* param)
         }
     }
     //end sanity check 2
-
+    */
 
     pthread_barrier_wait(&barrier);
     //Phase 2: scan boundaries and union if necessary
