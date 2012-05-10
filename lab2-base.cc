@@ -512,8 +512,8 @@ void union_at_boundaries(int32_t x_start, int32_t x_end, int32_t y_start, int32_
     {
         for (int x = x_start; x < x_end; x++)
         {
-            int32_t color1 = edges[x + y_end*width];
-            int32_t color2 = edges[x+(y_end+1)*width];
+            int32_t color1 = edges[x + (y_end - 1)*width];
+            int32_t color2 = edges[x +  y_end     *width];
             if (color1 >= 2  && color2 >= 2)
             {
                 //union these!
@@ -526,8 +526,8 @@ void union_at_boundaries(int32_t x_start, int32_t x_end, int32_t y_start, int32_
     {
         for (int y = y_start; y < y_end; y++)
         {
-            int32_t color1 = edges[x_end     + y*width];
-            int32_t color2 = edges[x_end + 1 + y*width];
+            int32_t color1 = edges[x_end - 1 + y*width];
+            int32_t color2 = edges[x_end     + y*width];
             if (color1 >= 2  && color2 >= 2)
             {
                 //union these!
