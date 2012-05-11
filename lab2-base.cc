@@ -420,7 +420,7 @@ color_components (int32_t x_start, int32_t x_end, int32_t y_start,
     color_pixels->push_back(0);
     color_pixels->push_back(0);
 
-    cur_col = 2 | (thread_num << 16);
+    cur_col = 2 | (thread_num << 24);
     for (y = y_start; y < y_end; y++) {
         for (x = x_start; x < x_end; x++) {
             if (0 == edge[y * width + x]) {
@@ -442,20 +442,20 @@ color_components (int32_t x_start, int32_t x_end, int32_t y_start,
     delete [] cq;
     *pix_count_ptr = color_pixels;
 
-    //fprintf(stderr, "Thread %d found %d colors\n", thread_num, cur_col - (thread_num << 16));
+    //fprintf(stderr, "Thread %d found %d colors\n", thread_num, cur_col - (thread_num << 24));
 
-    return cur_col - (thread_num << 16);
+    return cur_col - (thread_num << 24);
 }
 
 pair<int32_t, int32_t> find(int32_t num)
 {
     //fprintf(stderr, "Called find on %d\n", num);
     /*
-    if ((dsets.size() <= (num >> 16)) || (dsets[num>>16].size() <= (num & 0xFFFF)))
-        fprintf(stderr, "Out of bounds access: num is %x, dsets.size() is  %x, dsets[num >> 16].size() is %x\n", num, dsets.size(), dsets[num>>16].size());
+    if ((dsets.size() <= (num >> 24)) || (dsets[num>>24].size() <= (num & 0xFFFFFF)))
+        fprintf(stderr, "Out of bounds access: num is %x, dsets.size() is  %x, dsets[num >> 24].size() is %x\n", num, dsets.size(), dsets[num>>24].size());
     */
 
-    int32_t value = dsets[num >> 16][num & 0xFFFF];
+    int32_t value = dsets[num >> 24][num & 0xFFFFFF];
     if(value <= 0)
         return pair<int32_t, int32_t>(num, -value);
     else
@@ -464,11 +464,11 @@ pair<int32_t, int32_t> find(int32_t num)
 
 int32_t find_and_compress(int32_t num)
 {
-    int32_t value = dsets[num >> 16][num & 0xFFFF];
+    int32_t value = dsets[num >> 24][num & 0xFFFFFF];
     if(value <= 0)
         return num;
     else
-        return dsets[num >> 16][num & 0xFFFF] = find_and_compress(value);
+        return dsets[num >> 24][num & 0xFFFFFF] = find_and_compress(value);
 }
 
 void set_union(int32_t a, int32_t b)
@@ -487,19 +487,19 @@ void set_union(int32_t a, int32_t b)
         return;
     }
     
-    int32_t value1 = dsets[seta >> 16][seta & 0xFFFF];
-    int32_t value2 = dsets[setb >> 16][setb & 0xFFFF];
+    int32_t value1 = dsets[seta >> 24][seta & 0xFFFFFF];
+    int32_t value2 = dsets[setb >> 24][setb & 0xFFFFFF];
     int32_t newsize = value1 + value2;
 
     if(value1 > value2)
     {
-        dsets[seta >> 16][seta & 0xFFFF] = setb;
-        dsets[setb >> 16][setb & 0xFFFF] = newsize;
+        dsets[seta >> 24][seta & 0xFFFFFF] = setb;
+        dsets[setb >> 24][setb & 0xFFFFFF] = newsize;
     }
     else
     {
-        dsets[seta >> 16][seta & 0xFFFF] = newsize;
-        dsets[setb >> 16][setb & 0xFFFF] = seta;
+        dsets[seta >> 24][seta & 0xFFFFFF] = newsize;
+        dsets[setb >> 24][setb & 0xFFFFFF] = seta;
     }
 
     pthread_mutex_unlock(&dsets_lock);
@@ -615,7 +615,7 @@ write_new_image (int32_t width, int32_t height, JSAMPLE* buf, int32_t* edge,
 void* thread_func (void* param)
 {
     params_t *p = (params_t*) param;
-    vector<int32_t> *pix_count_ptr;
+    vector<int32_t> *pix_count_ptr = NULL;
 
     //printf("x_start: %d, x_end: %d, y_start: %d, y_end: %d\n", p->x_start, p->x_end, p->y_start, p->y_end);
 
@@ -663,7 +663,7 @@ void* thread_func (void* param)
         for (int x=0; x < width; x++)
         {
             int32_t val = edges[x+y*width];
-            if ((val >> 16) < 0 || (val >> 16) >=  p->num_threads || (val & 0xFFFF) < 1 || (val & 0xFFFF) >= dsets[val>>16].size())
+            if ((val >> 24) < 0 || (val >> 24) >=  p->num_threads || (val & 0xFFFFFF) < 1 || (val & 0xFFFFFF) >= dsets[val>>24].size())
                 fprintf(stderr, "Sanity 2 error! edge at (%d,%d) is %d\n", x, y, val);
         }
     }
@@ -688,7 +688,7 @@ void* thread_func (void* param)
                 //this test is for load balancing
                 if (components_seen % p->num_threads == p->thread_num)
                 {
-                    write_new_image(width, height, input_image, edges, (i << 16) | j, components_seen);
+                    write_new_image(width, height, input_image, edges, (i << 24) | j, components_seen);
                 }
                 components_seen++;
             }
