@@ -510,17 +510,24 @@ void union_at_boundaries(int32_t x_start, int32_t x_end, int32_t y_start, int32_
     //Only look at bottom and right edges of rectangle; other threads will handle rest
 
     //bottom edge
+
+  int32_t cached_color1 = -1;
+  int32_t cached_color2 = -1;
     if (y_end != height)
     {
         for (int x = x_start; x < x_end; x++)
         {
             int32_t color1 = edges[x + (y_end - 1)*width];
             int32_t color2 = edges[x +  y_end     *width];
-            if (color1 >= 2  && color2 >= 2)
+
+            if (  ((cached_color1 != color1) || (cached_color2 != color2)) && (color1 >= 2  && color2 >= 2))
             {
                 //union these!
                 set_union(color1, color2);
+                cached_color1 = color1;
+                cached_color2 = color2;
             }
+
         }
     }
 
@@ -530,10 +537,12 @@ void union_at_boundaries(int32_t x_start, int32_t x_end, int32_t y_start, int32_
         {
             int32_t color1 = edges[x_end - 1 + y*width];
             int32_t color2 = edges[x_end     + y*width];
-            if (color1 >= 2  && color2 >= 2)
+            if ( ((cached_color1 != color1) || (cached_color2 != color2)) && (color1 >= 2  && color2 >= 2))
             {
                 //union these!
                 set_union(color1, color2);
+                cached_color1 = color1;
+                cached_color2 = color2;
             }
         }
     }
