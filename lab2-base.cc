@@ -566,6 +566,10 @@ write_new_image (int32_t width, int32_t height, JSAMPLE* buf, int32_t* edge,
     int32_t mid;
     int32_t ret_val;
 
+    // These two variables are used as a cache for the find function
+    int32_t find_color = -1;
+    int32_t result_color;
+
     //fprintf(stderr, "Writing img_num %d with color %x\n", img_num, color);
 
     if (NULL == (new_buf = new JSAMPLE[width * height * 3]))
@@ -574,8 +578,15 @@ write_new_image (int32_t width, int32_t height, JSAMPLE* buf, int32_t* edge,
     }
 
     for (y = 0, mid = 0; height > y; y++) {
-        for (x = 0; width > x; x++) {
-            if (color == find(edge[y * width + x]).first) {
+        for (x = 0; width > x; x++)
+        {
+            if (find_color != edge[y * width + x])
+            {
+                find_color = edge[y * width + x];
+                result_color = find(find_color).first;
+            }
+
+            if (color == result_color) {
                 new_buf[mid] = buf[mid];
                 new_buf[mid + 1] = buf[mid + 1];
                 new_buf[mid + 2] = buf[mid + 2];
